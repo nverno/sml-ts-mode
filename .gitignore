@@ -1,0 +1,6 @@
+*.elc
+*~
+*.html
+tree-sitter-sml
+tmp.*
+*.tmp
