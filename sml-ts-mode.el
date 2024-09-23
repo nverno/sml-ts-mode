@@ -36,7 +36,13 @@
 (require 'treesit)
 
 (defcustom sml-ts-mode-indent-offset 2
-  "Number of spaces for each indentation step in `sml-ts-mode'."
+  "Number of spaces for each indentation step."
+  :type 'integer
+  :safe 'integerp
+  :group 'sml)
+
+(defcustom sml-ts-mode-indent-args 2
+  "Number of spaces to indent args on separate line."
   :type 'integer
   :safe 'integerp
   :group 'sml)
@@ -44,11 +50,40 @@
 
 ;;; Indentation
 
+(defun sml-ts-mode--anchor-list-closer (&rest args)
+  "Return the position to anchor a closing list bracket.
+When there are arguments following the opening bracket on the same line, align
+the closing bracket with the opener. Otherwise, align the closing bracket with
+its standalone-parent."
+  (save-excursion
+    (goto-char
+     (apply (alist-get 'first-sibling treesit-simple-indent-presets) args))
+    (forward-char 1)
+    (if (looking-at-p "\\s-*$")
+        (apply (alist-get 'standalone-parent treesit-simple-indent-presets)
+             args)
+      (point))))
+
 (defvar sml-ts-mode--indent-rules
   `((sml
      ((parent-is "source_file") column-0 0)
      ((node-is "}") standalone-parent 0)
-     ((node-is ")") parent-bol 0)
+     ((node-is ")") sml-ts-mode--anchor-list-closer 1)
+     ((node-is "]") sml-ts-mode--anchor-list-closer 0)
+     ((node-is ,(rx bos (or "in" "end" "then" "else") eos)) parent 0)
+     ((parent-is "fn_exp") parent sml-ts-mode-indent-offset)
+     ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
+     ((match nil "fmrule" "arg") parent-bol
+      (lambda (&rest _)
+        (+ sml-ts-mode-indent-offset sml-ts-mode-indent-args)))
+     ((parent-is ,(rx bos (or "fmrule" "let_exp" "cond_exp") eos))
+      parent-bol sml-ts-mode-indent-offset)
+     ((match nil "app_exp" nil 1 1) parent sml-ts-mode-indent-offset)
+     ((parent-is "app_exp") (nth-sibling 1) 0)
+     ((match nil ,(rx (or "paren_exp" "list_exp")) nil 1 1)
+      parent-bol sml-ts-mode-indent-offset)
+     ((parent-is "list_exp") (nth-sibling 1) 0)
+     ((parent-is "paren_exp") first-sibling 0)
      (catch-all parent-bol 0)))
   "Tree-sitter indent rules for SML.")
 
@@ -266,7 +301,7 @@ Return nil if there is no name or NODE is not a defun node."
 
 
 (when (fboundp 'derived-mode-add-parents)
-  (derived-mode-add-parents 'sml-ts-mode '(sml-mode)))
+  (derived-mode-add-parents 'sml-ts-mode '(sml-mode sml-prog-proc-mode)))
 
 (if (treesit-ready-p 'sml)
     (add-to-list 'auto-mode-alist '("\\.sml\\'" . sml-ts-mode)))
