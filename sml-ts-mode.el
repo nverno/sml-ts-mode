@@ -34,6 +34,7 @@
 ;;; Code:
 
 (require 'treesit)
+(require 'sml-mode nil t)               ; faces
 
 (defcustom sml-ts-mode-indent-offset 2
   "Number of spaces for each indentation step."
@@ -68,22 +69,33 @@ its standalone-parent."
   `((sml
      ((parent-is "source_file") column-0 0)
      ((node-is "}") standalone-parent 0)
-     ((node-is ")") sml-ts-mode--anchor-list-closer 1)
+     ((node-is ")") sml-ts-mode--anchor-list-closer 0)
      ((node-is "]") sml-ts-mode--anchor-list-closer 0)
+     ((match "end" ,(rx bos (or "sig_sigexp" "struct_strexp")))
+      parent-bol 0)
      ((node-is ,(rx bos (or "in" "end" "then" "else") eos)) parent 0)
      ((parent-is "fn_exp") parent sml-ts-mode-indent-offset)
      ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
      ((match nil "fmrule" "arg") parent-bol
       (lambda (&rest _)
         (+ sml-ts-mode-indent-offset sml-ts-mode-indent-args)))
-     ((parent-is ,(rx bos (or "fmrule" "let_exp" "cond_exp") eos))
+     ;; XXX(09/23/24): `sml-mode' does different here
+     ((match "|" ,(rx bos (or "case_exp" "datbind"))) standalone-parent
+      (lambda (&rest _) (+ (max 0 (- sml-ts-mode-indent-offset 2)))))
+     ((parent-is ,(rx bos (or "fmrule" "datbind" "valbind"
+                              "let_exp" "cond_exp" "case_exp"
+                              "sig_sigexp" "struct_strexp")
+                      eos))
       parent-bol sml-ts-mode-indent-offset)
+     ((match nil ,(rx bos (or "sequence_exp" "paren_exp"
+                              "tuple_exp" "list_exp"))
+             nil 1 1)
+      parent-bol sml-ts-mode-indent-offset)
+     ((parent-is ,(rx (or "sequence_exp" "tuple_exp" "list_exp")))
+      (nth-sibling 1) 0)
+     ((parent-is "paren_exp") first-sibling 0)
      ((match nil "app_exp" nil 1 1) parent sml-ts-mode-indent-offset)
      ((parent-is "app_exp") (nth-sibling 1) 0)
-     ((match nil ,(rx (or "paren_exp" "list_exp")) nil 1 1)
-      parent-bol sml-ts-mode-indent-offset)
-     ((parent-is "list_exp") (nth-sibling 1) 0)
-     ((parent-is "paren_exp") first-sibling 0)
      (catch-all parent-bol 0)))
   "Tree-sitter indent rules for SML.")
 
@@ -115,6 +127,19 @@ its standalone-parent."
     ( builtin constant function number property type)
     ( bracket delimiter operator variable))
   "Font-locking features for `treesit-font-lock-feature-list' in `sml-ts-mode'.")
+
+(defun sml-ts-mode--fontify-arg (node override start end &rest _args)
+  "Fontify function arguments in NODE.
+For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
+  (pcase (treesit-node-type node)
+    ((or "typed_pat" "paren_pat")
+     (sml-ts-mode--fontify-arg
+      (treesit-node-child node 0 t) override start end))
+    ("vid_pat"
+     (treesit-fontify-with-override
+      (treesit-node-start node) (treesit-node-end node)
+      'font-lock-variable-name-face
+      override start end))))
 
 (defvar sml-ts-mode--font-lock-settings
   (treesit-font-lock-rules
@@ -151,17 +176,30 @@ its standalone-parent."
 
    :language 'sml
    :feature 'definition
-   '((valbind
-      pat: [(wildcard_pat) (vid_pat)] @font-lock-variable-name-face)
-     (fvalbind
+   '((fvalbind
       (fmrule name: (_) @font-lock-function-name-face
               ;; FIXME(09/23/24): needs finesse
-              arg: [(_)] :* @font-lock-variable-name-face))
+              [(paren_pat) (vid_pat)] :* @sml-ts-mode--fontify-arg
+              :anchor "="))
+     ;; XXX(09/23/24): merge
+     (valbind
+      pat: [(wildcard_pat) (vid_pat)] @font-lock-variable-name-face)
+     (valbind pat: (typed_pat (vid_pat) @font-lock-variable-name-face))
+     (valdesc name: (vid) @font-lock-variable-name-face)
+     (tuple_pat (vid_pat) @font-lock-variable-name-face
+                ("," (vid_pat) @font-lock-variable-name-face) :*)
+     ;; Modules
+     (fctbind name: (_) @font-lock-module-def-face
+              arg: (strid) :? @font-lock-variable-name-face)
+     (sigbind name: (_) @font-lock-module-def-face)
+     (strbind name: (_) @font-lock-module-def-face)
+     ;; Types
+     (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
+     (type_dec (typbind name: (tycon) @font-lock-type-def-face))
+     (typedesc name: (_) @font-lock-type-def-face)
      ;; Constructors
      ((vid) @font-lock-type-face
-      (:match "^[A-Z].*" @font-lock-type-face))
-     ;; Modules
-     [(strid) (sigid) (fctid)] @font-lock-type-face)
+      (:match "^[A-Z].*" @font-lock-type-face)))
 
    :language 'sml
    :feature 'constant
@@ -176,27 +214,28 @@ its standalone-parent."
    `((fn_ty "->" @font-lock-type-face)
      (tuple_ty "*" @font-lock-type-face)
      (paren_ty ["(" ")"] @font-lock-type-face)
-     (tyvar_ty (tyvar) @font-lock-type-face)
-     (record_ty
-      ["{" "," "}"] @font-lock-type-face
-      (tyrow [(lab) ":"] @font-lock-type-face) :?
-      (ellipsis_tyrow ["..." ":"] @font-lock-type-face) :?)
-     (tycon_ty
-      (tyseq ["(" "," ")"] @font-lock-type-face) :?
-      (longtycon) @font-lock-type-face))
+     ;; (tyvar_ty (tyvar) @font-lock-type-face)
+     (tyvar) @font-lock-type-face
+     ;; XXX(09/23/24): a module use face?
+     [(strid) (sigid) (fctid)] @font-lock-type-face
+     (record_ty ["{" "," "}"] @font-lock-type-face
+                (tyrow [(lab) ":"] @font-lock-type-face) :?
+                (ellipsis_tyrow ["..." ":"] @font-lock-type-face) :?)
+     (tycon_ty (tyseq ["(" "," ")"] @font-lock-type-face) :?
+               (longtycon) @font-lock-type-face))
 
    ;; :language 'sml
    ;; :feature 'builtin
    ;; `()
-   ;; 
+   ;;
    ;; :language 'sml
    ;; :feature 'function
    ;; '()
-   ;; 
+   ;;
    ;; :language 'sml
    ;; :feature 'property
    ;; '()
-   ;; 
+   ;;
    ;; :language 'sml
    ;; :feature 'variable
    ;; '()
@@ -224,7 +263,7 @@ Return nil if there is no name or NODE is not a defun node."
         t))))
 
 
-;; Copied from `sml-mode-syntax-table'
+;; From `sml-mode-syntax-table'
 (defvar sml-ts-mode-syntax-table
   (let ((st (make-syntax-table)))
     (modify-syntax-entry ?\* ". 23n" st)
@@ -248,25 +287,6 @@ Return nil if there is no name or NODE is not a defun node."
   (when (treesit-ready-p 'sml)
     (treesit-parser-create 'sml)
 
-    ;; Settings copied from `sml-mode'
-    (setq-local paragraph-separate
-                (concat "\\([ \t]*\\*)?\\)?\\(" paragraph-separate "\\)"))
-    (setq-local require-final-newline t)
-    (setq-local electric-indent-chars
-                (cons ?\; (if (boundp 'electric-indent-chars)
-                              electric-indent-chars '(?\n))))
-    (setq-local electric-layout-rules
-                `((?\; . ,(lambda ()
-                            (save-excursion
-                              (skip-chars-backward " \t;")
-                              (unless (or (bolp)
-                                          (progn (skip-chars-forward " \t;")
-                                                 (eolp)))
-                                'after))))))
-    ;; TODO(09/23/24): copy stuff from `sml-mode'
-    ;; (setq-local prettify-symbols-alist sml-font-lock-symbols-alist)
-    ;; (setq-local outline-regexp sml-outline-regexp)
-
     ;; Comments
     (setq-local parse-sexp-ignore-comments t)
     (setq-local comment-start "(* ")
@@ -275,11 +295,34 @@ Return nil if there is no name or NODE is not a defun node."
     (setq-local comment-end-skip "\\s-*\\*+)")
     (setq-local comment-quote-nested nil)
 
+    ;; TODO(09/23/24): copy stuff from `sml-mode'
+    ;; (setq-local prettify-symbols-alist sml-font-lock-symbols-alist)
+    ;; (setq-local outline-regexp sml-outline-regexp)
+    (setq-local paragraph-separate
+                (concat "\\([ \t]*\\*)?\\)?\\(" paragraph-separate "\\)"))
+    (setq-local require-final-newline t)
+
     ;; Font-Locking
     (setq-local treesit-font-lock-settings sml-ts-mode--font-lock-settings)
     (setq-local treesit-font-lock-feature-list sml-ts-mode-feature-list)
 
-    ;; Navigation
+    ;; Indentation
+    (setq-local electric-indent-chars
+                (append "{}().;," (if (boundp 'electric-indent-chars)
+                                      electric-indent-chars '(?\n))))
+    (setq-local electric-layout-rules
+                `((?. . after) (?\{ . after)
+                  (?\} . before) (?\) . before)
+                  (?\; . ,(lambda ()
+                            (save-excursion
+                              (skip-chars-backward " \t;")
+                              (unless (or (bolp)
+                                          (progn (skip-chars-forward " \t;")
+                                                 (eolp)))
+                                'after))))))
+    (setq-local treesit-simple-indent-rules sml-ts-mode--indent-rules)
+
+    ;; TODO(09/23/24): Navigation
     (setq-local treesit-defun-type-regexp nil)
     (setq-local treesit-defun-name-function #'sml-ts-mode--defun-name)
     (setq-local treesit-thing-settings
@@ -287,9 +330,6 @@ Return nil if there is no name or NODE is not a defun node."
                                       "string_scon" "char_scon"))))))
     ;; (sexp (not ,(rx (or "{" "}" "[" "]" "(" ")" ","))))
     ;; (sentence nil)
-
-    ;; TODO(09/23/24): Indentation
-    (setq-local treesit-simple-indent-rules sml-ts-mode--indent-rules)
 
     ;; TODO(09/23/24): Imenu
     (setq-local treesit-simple-imenu-settings
