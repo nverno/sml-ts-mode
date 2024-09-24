@@ -15,10 +15,11 @@ This mode provides the typical tree-sitter goodies for SML buffers:
 
 Emacs 29.1 or above with tree-sitter support is required. 
 
-This package is uses the tree-sitter grammar for SML found from
-https://github.com/MatthewFluet/tree-sitter-sml.  _It won't work with other parsers!_
+This package requires the SML tree-sitter grammar from
+https://github.com/MatthewFluet/tree-sitter-sml. _It won't work with other
+parsers!_
 
-### Install tree-sitter parser for SML
+### Installing the SML parser
 
 Add the source to `treesit-language-source-alist`. 
 
