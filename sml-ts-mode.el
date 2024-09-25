@@ -209,12 +209,14 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
    :language 'sml
    :feature 'definition
    '(;; Functions / Parameters
-     (fvalbind
-      (fmrule
-       name: (_) @font-lock-function-name-face
-       ([(paren_pat) (vid_pat) (tuple_pat)] :* @sml-ts-mode--fontify-params
-        :anchor "=")
-       :?))
+     (fmrule
+      name: (_) @font-lock-function-name-face
+      ([(paren_pat) (vid_pat) (tuple_pat)] :* @sml-ts-mode--fontify-params
+       :anchor "=")
+      :?)
+     (mrule
+      ([(paren_pat) (vid_pat) (tuple_pat)] :* @sml-ts-mode--fontify-params
+       :anchor "=>"))
      (handle_exp (mrule (_) @sml-ts-mode--fontify-params))
      (tuple_pat (_) @sml-ts-mode--fontify-params
                 ("," (vid_pat) @sml-ts-mode--fontify-params) :*)
