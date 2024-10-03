@@ -170,6 +170,10 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
      (sml-ts-mode--fontify-params
       (treesit-node-child node 0 t) override start end))
     ("app_pat"
+     ;; Fontify both bindings in (h::t)
+     (when (equal "::" (treesit-node-text (treesit-node-child node 1)))
+       (sml-ts-mode--fontify-params
+        (treesit-node-child node 0 t) override start end))
      (sml-ts-mode--fontify-params
       (treesit-node-child node 1 t) override start end))
     ((or "vid_pat" "wildcard_pat")
@@ -186,7 +190,8 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
 
    :language 'sml
    :feature 'string
-   '([(string_scon) (char_scon)] @font-lock-string-face)
+   '((string_scon) @font-lock-string-face
+     (char_scon) @font-lock-constant-face)
 
    :language 'sml
    :feature 'keyword
@@ -218,36 +223,32 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
 
    :language 'sml
    :feature 'definition
-   '(;; Functions / Parameters
-     (fmrule
-      name: (_) @font-lock-function-name-face
-      ([(paren_pat) (vid_pat) (tuple_pat)] :* @sml-ts-mode--fontify-params
-       :anchor "=")
-      :?)
-     (mrule
-      ([(paren_pat) (vid_pat) (tuple_pat)] :* @sml-ts-mode--fontify-params
-       :anchor "=>"))
-     (handle_exp (mrule (_) @sml-ts-mode--fontify-params))
-     (tuple_pat (_) @sml-ts-mode--fontify-params
-                ("," (vid_pat) @sml-ts-mode--fontify-params) :*)
-     (app_pat (_) (_) @sml-ts-mode--fontify-params)
-     (valbind pat: (_) @sml-ts-mode--fontify-params)
-     (valdesc name: (vid) @font-lock-variable-name-face)
+   (let ((pats '((paren_pat) (vid_pat) (tuple_pat) (wildcard_pat))))
+     `((fmrule
+        name: (_) @font-lock-function-name-face
+        ([,@pats] :* @sml-ts-mode--fontify-params :anchor "=") :?)
+       (mrule ([,@pats] :* @sml-ts-mode--fontify-params :anchor "=>"))
+       (handle_exp (mrule (_) @sml-ts-mode--fontify-params))
+       (tuple_pat (_) @sml-ts-mode--fontify-params
+                  ("," (vid_pat) @sml-ts-mode--fontify-params) :*)
+       (app_pat (_) (_) @sml-ts-mode--fontify-params)
+       (valbind pat: (_) @sml-ts-mode--fontify-params)
+       (valdesc name: (vid) @font-lock-variable-name-face)
 
-     ;; Modules, Sigs
-     (fctbind name: (_) @font-lock-module-def-face
-              arg: (strid) :? @font-lock-variable-name-face)
-     (strbind name: (_) @font-lock-module-def-face)
-     (sigbind name: (_) @font-lock-module-def-face)
+       ;; Modules, Sigs
+       (fctbind name: (_) @font-lock-module-def-face
+                arg: (strid) :? @font-lock-variable-name-face)
+       (strbind name: (_) @font-lock-module-def-face)
+       (sigbind name: (_) @font-lock-module-def-face)
 
-     ;; Types
-     (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
-     (type_dec (typbind name: (tycon) @font-lock-type-def-face))
-     (typedesc name: (_) @font-lock-type-def-face)
+       ;; Types
+       (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
+       (type_dec (typbind name: (tycon) @font-lock-type-def-face))
+       (typedesc name: (_) @font-lock-type-def-face)
 
-     ;; Constructors
-     ((vid) @font-lock-type-face
-      (:match "^[A-Z].*" @font-lock-type-face)))
+       ;; Constructors
+       ((vid) @font-lock-type-face
+        (:match "^[A-Z].*" @font-lock-type-face))))
 
    :language 'sml
    :feature 'constant
@@ -300,6 +301,12 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
   "Return the defun name of NODE.
 Return nil if there is no name or NODE is not a defun node."
   (pcase (treesit-node-type node)
+    ("fun_dec"
+     (sml-ts-mode--defun-name
+      (treesit-node-child
+       (treesit-node-child node 0 t) 0 t)))
+    ((or "structure_strdec" "datatype_dec")
+     (sml-ts-mode--defun-name (treesit-node-child node 0 t)))
     (_ (treesit-node-text
         (treesit-node-child-by-field-name node "name")
         t))))
@@ -318,6 +325,10 @@ Return nil if there is no name or NODE is not a defun node."
     st)
   "The syntax table used in `sml-ts-mode'.")
 
+(defconst sml-ts-mode-prettify-symbols-alist
+  (cons '("::" . ?∷)
+        sml-font-lock-symbols-alist)
+  "Symbols to prettify in `sml-ts-mode'.")
 
 ;;;###autoload
 (define-derived-mode sml-ts-mode prog-mode "SML"
@@ -337,11 +348,11 @@ Return nil if there is no name or NODE is not a defun node."
     (setq-local comment-quote-nested nil)
 
     ;; Settings from `sml-mode'
-    (setq-local prettify-symbols-alist sml-font-lock-symbols-alist)
     (setq-local outline-regexp sml-outline-regexp)
     (setq-local paragraph-separate
                 (concat "\\([ \t]*\\*)?\\)?\\(" paragraph-separate "\\)"))
     (setq-local require-final-newline t)
+    (setq-local prettify-symbols-alist sml-ts-mode-prettify-symbols-alist)
 
     ;; Font-Locking
     (setq-local treesit-font-lock-settings sml-ts-mode--font-lock-settings)
@@ -365,23 +376,28 @@ Return nil if there is no name or NODE is not a defun node."
 
     ;; Navigation
     (setq-local treesit-defun-type-regexp
-                (rx bos (or "fmrule" "fctbind" "sigbind" "strbind"
-                            "valbind" "valdesc"
-                            "datbind" "typbind" "typedesc")))
+                (rx bos (or "fun_dec" "fmrule"
+                            "structure_strdec" "datatype_dec"
+                            "signature_sigdec" "functor_fctdec")))
     (setq-local treesit-defun-name-function #'sml-ts-mode--defun-name)
     (setq-local treesit-thing-settings
                 `((sml (text ,(rx (or "block_comment" "line_comment"
-                                      "string_scon" "char_scon"))))))
-    ;; TODO(09/23/24): things
-    ;; (sexp (not ,(rx (or "{" "}" "[" "]" "(" ")" ","))))
-    ;; (sentence nil)
+                                      "string_scon" "char_scon")))
+                       (sentence
+                        ,(rx bos (or "case" "if" "then" "else" "let" "in"
+                                     "fun_dec" "val_dec" "type_dec"
+                                     "structure_strdec" "signature_sigdec"
+                                     "functor_fctdec" "val_spec"
+                                     "fmrule" "mrule" "conbind")
+                             eos)))))
 
     ;; Imenu
     (setq-local treesit-simple-imenu-settings
-                `(("Function" "\\`fmrule\\'")
-                  ("Val" "\\`valbind\\'")
-                  ("Sig" "\\`sigbind\\'")
-                  ("Module" ,(rx bos (or "fctbind" "sigbind") eos))))
+                `((nil "\\`fun_dec\\'")
+                  ("Sig" "\\`signature_sigdec\\'")
+                  ("Struct" "\\`structure_strdec\\'")
+                  ("Datatype" "\\`datatype_dec\\'")
+                  ("Functor" "\\`functor_fctdec\\'")))
 
     (treesit-major-mode-setup)))
 
