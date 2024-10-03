@@ -141,20 +141,25 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
   "SML keywords for tree-sitter font-locking.")
 
 (defconst sml-ts-mode--builtins
-  '()
-  "SML builtin functions to tree-sitter font-locking.")
+  '("abs" "app" "before" "ceil" "chr" "concat" "exnMessage" "exnName" "explode"
+    "floor" "foldl" "foldr" "getOpt" "hd" "ignore" "implode" "isSome" "length"
+    "map" "null" "ord" "print" "real" "rev" "round" "size" "str" "substring"
+    "tl" "trunc" "valOf" "vector")
+  "SML builtin functions for tree-sitter font-locking.")
 
-;;; XXX(09/24/24): these are named nodes - swap with unamed ops
+;; Ops in named nodes: "=" "andalso" "orelse" "..." "#"
 (defconst sml-ts-mode--operators
-  '("=" "andalso" "orelse" "..." "#")
+  '("+" "-" "*" "/" "div" "mod"
+    "=" "<>" "<" ">" "<=" ">=" "not"
+    "^" "<<" ">>" "andb" "orb" "xorb" "notb"
+    "::" "@" "o" ":=" "!" "=>")
   "SML operators for tree-sitter font-locking.")
 
 (defvar sml-ts-mode-feature-list
   '(( comment definition)
     ( keyword string)
-    ;; XXX(09/24/24): unimplemented: property, function, variable, builtin
-    ( builtin constant function number property type)
-    ( bracket delimiter operator variable))
+    ( builtin constant number type)
+    ( bracket delimiter operator))
   "Font-lock features for `treesit-font-lock-feature-list' in `sml-ts-mode'.")
 
 (defun sml-ts-mode--fontify-params (node override start end &rest _args)
@@ -197,14 +202,19 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
 
    :language 'sml
    :feature 'operator
-   `([,@sml-ts-mode--operators] @font-lock-operator-face
+   `(["=" "andalso" "orelse" "..." "#"] @font-lock-operator-face
      ((vid) @font-lock-operator-face
-      (:match ,(rx bos (or "+" "-" "*" "/" "div" "mod"
-                           "=" "<>" "<" ">" "<=" ">=" "not"
-                           "^" "<<" ">>" "andb" "orb" "xorb" "notb"
-                           "::" "@" "o" ":=" "!" "=>")
-                   eos)
+      (:match ,(rx-to-string `(seq bos (or ,@sml-ts-mode--operators) eos))
               @font-lock-operator-face)))
+
+   :language 'sml
+   :feature 'builtin
+   ;; :override t
+   `(((vid_exp) @font-lock-builtin-face
+      (:match ,(rx-to-string `(seq bos (or ,@sml-ts-mode--builtins) eos))
+              @font-lock-builtin-face))
+     ((vid_exp) @font-lock-preprocessor-face
+      (:match ,(rx bos (or "use") eos) @font-lock-preprocessor-face)))
 
    :language 'sml
    :feature 'definition
@@ -260,10 +270,6 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
      (tycon_ty (tyseq ["(" "," ")"] @font-lock-type-face) :?
                (longtycon) @font-lock-type-face))
 
-   ;; :language 'sml
-   ;; :feature 'builtin
-   ;; `()
-   ;;
    ;; :language 'sml
    ;; :feature 'function
    ;; '()
@@ -381,7 +387,7 @@ Return nil if there is no name or NODE is not a defun node."
 
 
 (when (fboundp 'derived-mode-add-parents)
-  (derived-mode-add-parents 'sml-ts-mode '(sml-mode sml-prog-proc-mode)))
+  (derived-mode-add-parents 'sml-ts-mode '(sml-mode)))
 
 (if (treesit-ready-p 'sml)
     (add-to-list 'auto-mode-alist '("\\.sml\\'" . sml-ts-mode)))
