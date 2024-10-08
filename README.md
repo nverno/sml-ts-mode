@@ -2,12 +2,12 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-This mode provides the typical tree-sitter goodies for SML buffers:
+This mode provides the following features for Standard ML (SML) buffers:
 
-- indentation
-- font-locking
-- imenu
-- structural navigation
+- Indentation
+- Font-locking
+- Imenu
+- Structural navigation
 
 ![example](doc/sml-ts-mode.png)
 

@@ -49,9 +49,28 @@
   :safe 'integerp
   :group 'sml)
 
-(defcustom sml-ts-mode-indent-module 2
+(defcustom sml-ts-mode-indent-struct 2
   "Number of spaces to indent structure and functor bodies."
   :type 'integer
+  :safe 'integerp
+  :group 'sml)
+
+(defcustom sml-ts-mode-indent-and 0
+  "Indentation for \"and\" keywords.
+
+When \\='right-align, right-align \"and\" keywords with their leader:
+
+    datatype foo = ...
+         and bar = ...
+
+    fun foo = ...
+    and bar = ...
+
+Otherwise, this specifies the number of spaces to indent relative to the leader.
+A value of \\='nil indents with `sml-ts-mode-indent-offset'."
+  :type '(choice (const :tag "Right Align" right-align)
+                 integer
+                 (const :tag "Use default offset" nil))
   :safe 'integerp
   :group 'sml)
 
@@ -72,6 +91,32 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
                args)
       (point))))
 
+(defun sml-ts-mode--anchor-and (&rest args)
+  "Calculate indentation for \"and\" keywords relative to their leaders.
+See `treesit-simple-indent-rules' for details of ARGS."
+  (let ((pos (apply (alist-get 'parent-bol treesit-simple-indent-presets)
+                    args)))
+    (if (eq 'right-align sml-ts-mode-indent-and)
+        (- (treesit-node-end (treesit-node-at pos)) 3)
+      (+ pos (or sml-ts-mode-indent-and
+                 sml-ts-mode-indent-offset)))))
+
+(defun sml-ts-mode--anchor-| (&rest args)
+  "Calculate indentation anchor in branch rule.
+See `treesit-simple-indent-rules' for details of ARGS."
+  (let ((pos (apply (alist-get 'parent-bol treesit-simple-indent-presets)
+                    args)))
+    (if (equal "|" (treesit-node-type (treesit-node-at pos)))
+        (+ pos 2)
+      pos)))
+
+(defun sml-ts-mode--anchor-fun (&rest args)
+  "Calculate indentation anchor for function bodies.
+See `treesit-simple-indent-rules' for details of ARGS."
+  (let ((pos (apply (alist-get 'parent-bol treesit-simple-indent-presets)
+                    args)))
+    (+ pos (if (equal "|" (treesit-node-type (treesit-node-at pos))) 2 4))))
+
 (defun sml-ts-mode--indent-pipe (&rest _)
   "Calculate indent offset for \"|\"."
   (max 0 (- sml-ts-mode-indent-offset 2)))
@@ -84,48 +129,58 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
   `((sml
      ((parent-is "source_file") column-0 0)
      ((node-is "}") standalone-parent 0)
+     ((match ")" "fctapp_strexp") (nth-sibling 1) 1)
      ((node-is ")") sml-ts-mode--anchor-list-closer 0)
      ((node-is "]") sml-ts-mode--anchor-list-closer 0)
-     ((match "end" ,(rx bos (or "sig_sigexp" "struct_strexp"))) parent-bol 0)
-     ((node-is "struct") parent-bol 0)
-     ((node-is "sig") parent-bol 0)
-     ;; XXX(10/08/24): add option to align 'else if'?
-     ((node-is ,(rx bos (or "in" "end" "then" "else" "do") eos)) parent 0)
+     ((node-is ,(rx bos "and" eos)) sml-ts-mode--anchor-and 0)
+     ((node-is ,(rx bos "withtype" eos)) parent-bol 0)
      ((node-is ,(rx bos "handle" eos)) parent 0)
      ((parent-is "handle_exp") parent sml-ts-mode-indent-offset)
+     ;; Structures / Functors
+     ((match "end" ,(rx bos (or "sig_sigexp" "struct_strexp"))) parent-bol 0)
+     ((parent-is "struct_strexp") parent-bol sml-ts-mode-indent-struct)
+     ((node-is ,(rx bos (or "sig" "struct") eos)) parent-bol 0)
+     ;; Let
+     ((match ,(rx bos (or "in" "end") eos) "let_exp") sml-ts-mode--anchor-| 0)
+     ((parent-is "let_exp") sml-ts-mode--anchor-| sml-ts-mode-indent-offset)
+     ((node-is ,(rx bos (or "in" "end" "then" "else" "do") eos)) parent 0)
+     ;; Cases
+     ((match "|" ,(rx bos (or "datbind"))) parent-bol sml-ts-mode--indent-pipe)
+     ((match "|" "case_exp") parent sml-ts-mode--indent-pipe)
+     ((parent-is ,(rx bos "case_exp" eos)) parent sml-ts-mode-indent-offset)
+     ;; Functions
+     ((match "|" "fvalbind") parent-bol 2)
+     ((match nil "fmrule" "arg") parent-bol sml-ts-mode--indent-args)
+     ((parent-is "fmrule") sml-ts-mode--anchor-fun 0)
      ((parent-is "fn_exp") parent sml-ts-mode-indent-offset)
      ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
-     ((match nil "fmrule" "arg") parent-bol sml-ts-mode--indent-args)
-     ;; Cases
-     ((match "|" "case_exp") parent sml-ts-mode--indent-pipe)
-     ((parent-is ,(rx bos (or "let_exp" "case_exp")))
-      parent sml-ts-mode-indent-offset)
-     ;; Align fun names in patterns
-     ((match "|" "fvalbind") parent-bol 2)
-     ((match "|" ,(rx bos (or "datbind")))
-      parent-bol sml-ts-mode--indent-pipe)
-     ((parent-is ,(rx bos (or "fmrule" "fvalbind" "datbind" "valbind"
-                              "cond_exp" "sig_sigexp" "iter_exp"
-                              "local_strdec")
+     ((match nil "fctapp_strexp" "arg") (nth-sibling 2) 0)
+     ((parent-is ,(rx bos (or "fvalbind" "datbind" "valbind" "valdesc"
+                              "cond_exp" "iter_exp"
+                              "local_strdec" "local_dec"
+                              "fctapp_strexp" "sig_sigexp"
+                              "typbind")
                       eos))
       parent-bol sml-ts-mode-indent-offset)
-     ;; Structures / Functors
-     ((parent-is "struct_strexp") parent-bol sml-ts-mode-indent-module)
-     ;; List Types
-     ((match nil ,(rx bos (or "sequence_exp" "paren_exp" "list_exp"
-                              "record_exp" "record_pat"
-                              "tuple_exp" "tuple_pat" "app_pat"))
+     ;; Types
+     ((match "*" "tuple_ty") parent 0)
+     ((match "->" "fn_ty") parent 0)
+     ((parent-is ,(rx bos (or "tuple_ty" "fn_ty" "tyrow" "tycon_ty") eos))
+      parent sml-ts-mode-indent-offset)
+     ;; Lists, Sequences, Records, Tuples
+     ((match nil ,(rx bos (or "sequence_exp" "paren_exp" "paren_pat"
+                              "list_exp" "record_exp" "record_pat" "record_ty"
+                              "tyseq" "tuple_exp" "tuple_pat" "tuple_ty" "app_pat"))
              nil 1 1)
       parent-bol sml-ts-mode-indent-offset)
      ((parent-is ,(rx (or "sequence_exp" "list_exp"
-                          "record_exp" "record_pat"
-                          "tuple_exp" "tuple_pat" "app_pat")))
+                          "record_exp" "record_pat" "record_ty"
+                          "tyseq" "tuple_ty" "tuple_exp" "tuple_pat" "app_pat")))
       (nth-sibling 1) 0)
-     ((parent-is "paren_exp") first-sibling 0)
-     ((match nil "app_exp" nil 1 1)
-      parent sml-ts-mode-indent-offset)
+     ((parent-is ,(rx bos (or "paren_exp" "paren_pat" "disj_pat"))) first-sibling 0)
+     ((match nil "app_exp" nil 1 1) parent sml-ts-mode-indent-offset)
      ((parent-is "app_exp") (nth-sibling 1) 0)
-     ;; XXX(10/08/24): indent block comments?
+     ;; XXX(10/08/24): Indent in block comments?
      ((parent-is "block_comment") no-indent)
      (catch-all parent-bol 0)))
   "Tree-sitter indent rules for SML.")
@@ -223,11 +278,6 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
               @font-lock-builtin-face))
      ((vid_exp) @font-lock-preprocessor-face
       (:match ,(rx bos (or "use") eos) @font-lock-preprocessor-face)))
-
-   :language 'sml
-   :feature 'property
-   `((record_exp (exprow (lab) @font-lock-property-name-face))
-     (recordsel_exp (lab) @font-lock-property-name-face))
    
    :language 'sml
    :feature 'definition
@@ -238,6 +288,7 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
        (mrule ([,@pats] :* @sml-ts-mode--fontify-params :anchor "=>"))
        (handle_exp (mrule (_) @sml-ts-mode--fontify-params))
        (labvar_patrow [(vid)] @font-lock-variable-name-face)
+       (patrow (vid_pat) @sml-ts-mode--fontify-params)
        (tuple_pat (_) @sml-ts-mode--fontify-params
                   ("," (vid_pat) @sml-ts-mode--fontify-params) :*)
        (app_pat (_) (_) @sml-ts-mode--fontify-params)
@@ -250,6 +301,8 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
        (sigbind name: (_) @font-lock-module-def-face)
        ;; Types
        (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
+       (datatype_dec
+        withtype: (typbind name: (tycon) @font-lock-type-def-face))
        (type_dec (typbind name: (tycon) @font-lock-type-def-face))
        (typedesc name: (_) @font-lock-type-def-face)
        ((vid) @font-lock-type-face
@@ -259,7 +312,16 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
    :feature 'constant
    `(((vid) @font-lock-constant-face
       (:match ,(rx bos (or "true" "false" "nil" "ref") eos)
-              @font-lock-constant-face)))
+              @font-lock-constant-face))
+     (recordsel_exp ((lab) @font-lock-constant-face
+                     (:match "^[0-9]+$" @font-lock-constant-face))))
+
+   :language 'sml
+   :feature 'property
+   `(;; (record_exp (exprow (lab) @font-lock-property-name-face))
+     (tyrow (lab) @font-lock-property-name-face)
+     (patrow (lab) @font-lock-property-use-face)
+     (exprow (lab) @font-lock-property-name-face))
 
    :language 'sml
    :feature 'type
