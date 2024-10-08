@@ -321,7 +321,7 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
    `(;; (record_exp (exprow (lab) @font-lock-property-name-face))
      (tyrow (lab) @font-lock-property-name-face)
      (patrow (lab) @font-lock-property-use-face)
-     (exprow (lab) @font-lock-property-name-face))
+     (exprow (lab) @font-lock-property-use-face))
 
    :language 'sml
    :feature 'type
