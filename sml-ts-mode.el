@@ -2,7 +2,7 @@
 
 ;; Author: Noah Peart <noah.v.peart@gmail.com>
 ;; URL: https://github.com/nverno/sml-ts-mode
-;; Version: 0.0.1
+;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.1") (sml-mode "6.12"))
 ;; Created: 23 September 2024
 ;; Keywords: sml languages tree-sitter
@@ -80,7 +80,6 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
   "Calculate indent offest for args."
   (+ sml-ts-mode-indent-offset sml-ts-mode-indent-args))
 
-;;; TODO(09/24/24): block comment indentation
 (defvar sml-ts-mode--indent-rules
   `((sml
      ((parent-is "source_file") column-0 0)
@@ -88,41 +87,46 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
      ((node-is ")") sml-ts-mode--anchor-list-closer 0)
      ((node-is "]") sml-ts-mode--anchor-list-closer 0)
      ((match "end" ,(rx bos (or "sig_sigexp" "struct_strexp"))) parent-bol 0)
-
-     ;; XXX(09/23/24): revisit indentation after 'else if'
-     ((node-is ,(rx bos (or "in" "end" "then" "else") eos)) parent 0)
-
+     ((node-is "struct") parent-bol 0)
+     ((node-is "sig") parent-bol 0)
+     ;; XXX(10/08/24): add option to align 'else if'?
+     ((node-is ,(rx bos (or "in" "end" "then" "else" "do") eos)) parent 0)
+     ((node-is ,(rx bos "handle" eos)) parent 0)
+     ((parent-is "handle_exp") parent sml-ts-mode-indent-offset)
      ((parent-is "fn_exp") parent sml-ts-mode-indent-offset)
      ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
      ((match nil "fmrule" "arg") parent-bol sml-ts-mode--indent-args)
-
+     ;; Cases
      ((match "|" "case_exp") parent sml-ts-mode--indent-pipe)
      ((parent-is ,(rx bos (or "let_exp" "case_exp")))
       parent sml-ts-mode-indent-offset)
-
      ;; Align fun names in patterns
      ((match "|" "fvalbind") parent-bol 2)
      ((match "|" ,(rx bos (or "datbind")))
       parent-bol sml-ts-mode--indent-pipe)
      ((parent-is ,(rx bos (or "fmrule" "fvalbind" "datbind" "valbind"
-                              "cond_exp" "sig_sigexp")
+                              "cond_exp" "sig_sigexp" "iter_exp"
+                              "local_strdec")
                       eos))
       parent-bol sml-ts-mode-indent-offset)
-
      ;; Structures / Functors
      ((parent-is "struct_strexp") parent-bol sml-ts-mode-indent-module)
-
-     ((match nil ,(rx bos (or "sequence_exp" "paren_exp" "record_exp" "list_exp"
+     ;; List Types
+     ((match nil ,(rx bos (or "sequence_exp" "paren_exp" "list_exp"
+                              "record_exp" "record_pat"
                               "tuple_exp" "tuple_pat" "app_pat"))
              nil 1 1)
       parent-bol sml-ts-mode-indent-offset)
-     ((parent-is ,(rx (or "sequence_exp" "record_exp" "list_exp"
+     ((parent-is ,(rx (or "sequence_exp" "list_exp"
+                          "record_exp" "record_pat"
                           "tuple_exp" "tuple_pat" "app_pat")))
       (nth-sibling 1) 0)
      ((parent-is "paren_exp") first-sibling 0)
-     ((match nil "app_exp" nil 1 1) parent sml-ts-mode-indent-offset)
+     ((match nil "app_exp" nil 1 1)
+      parent sml-ts-mode-indent-offset)
      ((parent-is "app_exp") (nth-sibling 1) 0)
-
+     ;; XXX(10/08/24): indent block comments?
+     ((parent-is "block_comment") no-indent)
      (catch-all parent-bol 0)))
   "Tree-sitter indent rules for SML.")
 
@@ -158,7 +162,7 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of ARGS."
 (defvar sml-ts-mode-feature-list
   '(( comment definition)
     ( keyword string)
-    ( builtin constant number type)
+    ( builtin constant number type property)
     ( bracket delimiter operator))
   "Font-lock features for `treesit-font-lock-feature-list' in `sml-ts-mode'.")
 
@@ -214,7 +218,6 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
 
    :language 'sml
    :feature 'builtin
-   ;; :override t
    `(((vid_exp) @font-lock-builtin-face
       (:match ,(rx-to-string `(seq bos (or ,@sml-ts-mode--builtins) eos))
               @font-lock-builtin-face))
@@ -222,31 +225,33 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
       (:match ,(rx bos (or "use") eos) @font-lock-preprocessor-face)))
 
    :language 'sml
+   :feature 'property
+   `((record_exp (exprow (lab) @font-lock-property-name-face))
+     (recordsel_exp (lab) @font-lock-property-name-face))
+   
+   :language 'sml
    :feature 'definition
-   (let ((pats '((paren_pat) (vid_pat) (tuple_pat) (wildcard_pat))))
+   (let ((pats '((app_pat) (paren_pat) (vid_pat) (tuple_pat) (wildcard_pat))))
      `((fmrule
         name: (_) @font-lock-function-name-face
         ([,@pats] :* @sml-ts-mode--fontify-params :anchor "=") :?)
        (mrule ([,@pats] :* @sml-ts-mode--fontify-params :anchor "=>"))
        (handle_exp (mrule (_) @sml-ts-mode--fontify-params))
+       (labvar_patrow [(vid)] @font-lock-variable-name-face)
        (tuple_pat (_) @sml-ts-mode--fontify-params
                   ("," (vid_pat) @sml-ts-mode--fontify-params) :*)
        (app_pat (_) (_) @sml-ts-mode--fontify-params)
        (valbind pat: (_) @sml-ts-mode--fontify-params)
        (valdesc name: (vid) @font-lock-variable-name-face)
-
        ;; Modules, Sigs
        (fctbind name: (_) @font-lock-module-def-face
                 arg: (strid) :? @font-lock-variable-name-face)
        (strbind name: (_) @font-lock-module-def-face)
        (sigbind name: (_) @font-lock-module-def-face)
-
        ;; Types
        (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
        (type_dec (typbind name: (tycon) @font-lock-type-def-face))
        (typedesc name: (_) @font-lock-type-def-face)
-
-       ;; Constructors
        ((vid) @font-lock-type-face
         (:match "^[A-Z].*" @font-lock-type-face))))
 
@@ -261,27 +266,13 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
    `((fn_ty "->" @font-lock-type-face)
      (tuple_ty "*" @font-lock-type-face)
      (paren_ty ["(" ")"] @font-lock-type-face)
-     ;; (tyvar_ty (tyvar) @font-lock-type-face)
      (tyvar) @font-lock-type-face
-     ;; A module use face?
      [(strid) (sigid) (fctid)] @font-lock-type-face
      (record_ty ["{" "," "}"] @font-lock-type-face
                 (tyrow [(lab) ":"] @font-lock-type-face) :?
                 (ellipsis_tyrow ["..." ":"] @font-lock-type-face) :?)
      (tycon_ty (tyseq ["(" "," ")"] @font-lock-type-face) :?
                (longtycon) @font-lock-type-face))
-
-   ;; :language 'sml
-   ;; :feature 'function
-   ;; '()
-   ;;
-   ;; :language 'sml
-   ;; :feature 'property
-   ;; '()
-   ;;
-   ;; :language 'sml
-   ;; :feature 'variable
-   ;; '()
 
    :language 'sml
    :feature 'number
@@ -305,7 +296,7 @@ Return nil if there is no name or NODE is not a defun node."
      (sml-ts-mode--defun-name
       (treesit-node-child
        (treesit-node-child node 0 t) 0 t)))
-    ((or "structure_strdec" "datatype_dec")
+    ((or "structure_strdec" "datatype_dec" "signature_sigdec" "functor_fctdec")
      (sml-ts-mode--defun-name (treesit-node-child node 0 t)))
     (_ (treesit-node-text
         (treesit-node-child-by-field-name node "name")
@@ -360,8 +351,10 @@ Return nil if there is no name or NODE is not a defun node."
 
     ;; Indentation
     (setq-local electric-indent-chars
-                (append "|{}().;," (if (boundp 'electric-indent-chars)
-                                       electric-indent-chars '(?\n))))
+                (append "|{}().;,"
+                        (if (boundp 'electric-indent-chars)
+                            electric-indent-chars
+                          '(?\n))))
     (setq-local electric-layout-rules
                 `((?. . after) (?\{ . after) (?| . after)
                   (?\} . before) (?\) . before)
@@ -393,7 +386,7 @@ Return nil if there is no name or NODE is not a defun node."
 
     ;; Imenu
     (setq-local treesit-simple-imenu-settings
-                `((nil "\\`fun_dec\\'")
+                `(("Function" "\\`fun_dec\\'")
                   ("Sig" "\\`signature_sigdec\\'")
                   ("Struct" "\\`structure_strdec\\'")
                   ("Datatype" "\\`datatype_dec\\'")
