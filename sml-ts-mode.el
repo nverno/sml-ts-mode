@@ -103,7 +103,7 @@ its standalone-parent. See `treesit-simple-indent-rules' for details of PARENT."
   (let ((open (treesit-node-child parent 0)))
     (save-excursion
       (goto-char (treesit-node-end open))
-      (if (looking-at-p "\\s-*$")
+      (if (looking-at-p "[[({ \t]*$")
           (if (progn (goto-char (treesit-node-start open))
                      (looking-back (rx bol (* whitespace))
                                    (line-beginning-position)))
@@ -184,7 +184,8 @@ See `treesit-simple-indent-rules' for details of PARENT."
      ((parent-is "let_exp") sml-ts-mode--anchor-| sml-ts-mode-indent-offset)
      ;; If/then/else
      ((node-is ,(rx bos (or "then" "else") eos)) sml-ts-mode--anchor-cond 0)
-     ((node-is ,(rx bos (or "in" "end" "then" "else" "do") eos)) parent 0)
+     ((node-is ,(rx bos (or "in" "end" "do") eos)) parent 0)
+     ((parent-is "cond_exp") parent sml-ts-mode-indent-offset)
      ;; Cases
      ((match "|" ,(rx bos (or "datbind" "datdesc")))
       parent-bol sml-ts-mode--indent-pipe)
@@ -198,14 +199,14 @@ See `treesit-simple-indent-rules' for details of PARENT."
      ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
      ((match nil "fctapp_strexp" "arg") (nth-sibling 2) 0)
      ((parent-is ,(rx bos (or "fvalbind" "valbind" "valdesc" "datbind" "datdesc"
-                              "cond_exp" "iter_exp" "local_strdec" "local_dec"
+                              "iter_exp" "local_strdec" "local_dec"
                               "fctapp_strexp" "sig_sigexp" "typbind")
                       eos))
       parent-bol sml-ts-mode-indent-offset)
      ;; Types
      ((match "*" "tuple_ty") parent 0)
-     ((match "->" "fn_ty") parent 0)
-     ((parent-is ,(rx bos (or "tuple_ty" "fn_ty" "tyrow" "tycon_ty") eos))
+     ((parent-is ,(rx bos (or "fn_ty" "tuple_ty" "conbind" "tyrow" "tycon_ty")
+                      eos))
       parent-bol sml-ts-mode-indent-offset)
      ;; Lists, Sequences, Records, Tuples, Patterns
      ((match nil ,(rx bos (or "sequence_exp" "paren_exp" "paren_pat" "list_exp"
@@ -218,11 +219,13 @@ See `treesit-simple-indent-rules' for details of PARENT."
                           "record_pat" "record_ty" "tyseq" "tuple_ty"
                           "tuple_exp" "tuple_pat" "app_pat")))
       (nth-sibling 1) 0)
-     ((parent-is ,(rx bos (or "paren_exp" "paren_pat" "disj_pat"))) first-sibling 0)
+     ((parent-is ,(rx bos (or "paren_exp" "paren_pat" "disj_pat")))
+      (nth-sibling 1) 0)
      ((match nil "app_exp" nil 1 1) parent sml-ts-mode-indent-offset)
      ((parent-is "app_exp") (nth-sibling 1) 0)
      ;; XXX(10/08/24): Indent in block comments?
      ((parent-is "block_comment") no-indent)
+     ((parent-is "ERROR") no-indent)
      (catch-all parent-bol 0)))
   "Tree-sitter indent rules for SML.")
 
@@ -319,7 +322,7 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
               @font-lock-builtin-face))
      ((vid_exp) @font-lock-preprocessor-face
       (:match ,(rx bos (or "use") eos) @font-lock-preprocessor-face)))
-   
+
    :language 'sml
    :feature 'definition
    (let ((pats '((app_pat) (paren_pat) (vid_pat) (tuple_pat) (wildcard_pat))))
@@ -346,6 +349,7 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
        (datatype_dec
         withtype: (typbind name: (tycon) @font-lock-type-def-face))
        (type_dec (typbind name: (tycon) @font-lock-type-def-face))
+       (type_spec (typbind name: (tycon) @font-lock-type-def-face))
        (typedesc name: (_) @font-lock-type-def-face)
        (infix_dec (vid) @font-lock-function-name-face)
        ((vid) @font-lock-type-face
