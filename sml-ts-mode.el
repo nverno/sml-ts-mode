@@ -145,7 +145,8 @@ See `treesit-simple-indent-rules' for details of ARGS."
      ((parent-is "let_exp") sml-ts-mode--anchor-| sml-ts-mode-indent-offset)
      ((node-is ,(rx bos (or "in" "end" "then" "else" "do") eos)) parent 0)
      ;; Cases
-     ((match "|" ,(rx bos (or "datbind"))) parent-bol sml-ts-mode--indent-pipe)
+     ((match "|" ,(rx bos (or "datbind" "datdesc")))
+      parent-bol sml-ts-mode--indent-pipe)
      ((match "|" "case_exp") parent sml-ts-mode--indent-pipe)
      ((parent-is ,(rx bos "case_exp" eos)) parent sml-ts-mode-indent-offset)
      ;; Functions
@@ -155,7 +156,8 @@ See `treesit-simple-indent-rules' for details of ARGS."
      ((parent-is "fn_exp") parent sml-ts-mode-indent-offset)
      ((parent-is "^mrule") grand-parent sml-ts-mode-indent-offset)
      ((match nil "fctapp_strexp" "arg") (nth-sibling 2) 0)
-     ((parent-is ,(rx bos (or "fvalbind" "datbind" "valbind" "valdesc"
+     ((parent-is ,(rx bos (or "fvalbind" "valbind" "valdesc"
+                              "datbind" "datdesc"
                               "cond_exp" "iter_exp"
                               "local_strdec" "local_dec"
                               "fctapp_strexp" "sig_sigexp"
@@ -301,6 +303,7 @@ For a description of OVERRIDE, START, and END, see `treesit-font-lock-rules'."
        (sigbind name: (_) @font-lock-module-def-face)
        ;; Types
        (datatype_dec (datbind name: (tycon) @font-lock-type-def-face))
+       (datatype_spec (datdesc name: (tycon) @font-lock-type-def-face))
        (datatype_dec
         withtype: (typbind name: (tycon) @font-lock-type-def-face))
        (type_dec (typbind name: (tycon) @font-lock-type-def-face))
