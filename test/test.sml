@@ -50,10 +50,10 @@ end
 structure MkList :> sig
   val group : { bininfo: BinInfo.info -> 'element,
                 smlinfo: SmlInfo.info -> 'element,
-                Cons: 'element * 'elements -> 'elements,
-                Nil: 'elements
-              } ->
-    GroupGraph.group -> 'elements
+                Cons: 'element * 'elements
+                  -> 'elements,
+                Nil: 'elements }
+    -> GroupGraph.group -> 'elements
 end = struct
 
   structure DG = DependencyGraph
